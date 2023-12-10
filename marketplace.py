@@ -192,7 +192,8 @@ class Marketplace():
                             break
 
                     # does this change for indifference?
-                    if any(lender in group for group in preferred_renter.true_pref_order[:renter_current_match_group_index]):
+                    # can be in same group (index + 1)
+                    if any(lender in group for group in preferred_renter.true_pref_order[:renter_current_match_group_index + 1]):
                         print("Found unstable pair.")
                         return False  # Found an unstable pair
 
@@ -221,8 +222,9 @@ class Marketplace():
                             lender_current_match_group_index = j
                             print(f"Lender {preferred_lender.id} is matched with {preferred_lender.match.id} in true pref group {lender_current_match_group_index}")
                             break
-
-                    if any(renter in group for group in preferred_lender.true_pref_order[:lender_current_match_group_index]):
+                    
+                    # can be in same group
+                    if any(renter in group for group in preferred_lender.true_pref_order[:lender_current_match_group_index+1]):
                         print("Found unstable pair.")
                         return False  # Found an unstable pair
 
