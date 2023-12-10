@@ -25,7 +25,8 @@ class Agent:
         # self.weights = np.random.dirichlet(np.ones(len(HEURISTICS),size=1))
         self.weights = weights
 
-        self.pref_order = None
+        self.reported_pref_order = None
+        self.true_pref_order = None # TODO
 
         self.match = None # to be matched
 
@@ -36,74 +37,101 @@ class Agent:
         price_fx = duration # LINEAR FUNCTION
         # wrap in gaussian where function is mean
         return np.random.normal(price_fx, self.price_std)
+    
+    def stoch_pref_order(self, others, adjusted_std):
+        # agents don't actually know their true preferences, this is "benchmark"?
+        new_duration_weight = np.random.normal(self.weights["DURATION"], adjusted_std)
 
+        duration_mean = np.mean([other.duration for other in others])
+        duration_std = np.std([other.duration for other in others])
+        price_mean = np.mean([other.price for other in others])
+        price_std = np.std([other.price for other in others])
 
-class Lender(Agent):
-    def __init__(self, id, duration_mean, duration_std, price_std):
-        super().__init__(id, duration_mean, duration_std, price_std)
+        utility_dict = {}
+        for other in others:
+            duration_diff_normalized = abs(other.duration - self.duration)/duration_std 
+            price_normalized = (other.price - price_mean)/price_std 
+
+            # calculate_utility implemented by children
+            utility = self.calculate_utility(new_duration_weight, duration_diff_normalized, price_normalized)
+            utility_dict.setdefault(utility, []).append(other)
+        
+        # list of lists; inner list is group of agents with same utility
+        sorted_agents = [group for _, group in sorted(utility_dict.items(), key=lambda item: item[0])]
+        self.true_pref_order = sorted_agents
+    
+    def calculate_utility(self, duration_weight, other_duration, other_price):
+        raise NotImplementedError("Subclasses should implement this method.")
+    
+    def group_pref_order(self, others):
+        raise NotImplementedError("TODO.")
+    
+    def area_pref_order(self, others):
+        raise NotImplementedError("TODO.")
+    
 
     def strict_pref_order(self, renters):
+        is_price_descending = self.is_price_high_good() # true for lender, false for renter
+
         if self.priority == "DURATION":
             # decreasing order of price (higher price = higher priority)
-            price_sort = sorted(renters, key=lambda renter: renter.price, reverse=True)
+            price_sort = sorted(renters, key=lambda renter: renter.price, reverse=is_price_descending)
             # increasing order of duration
             sorted_renters = sorted(price_sort, key=lambda renter: abs(renter.duration - self.duration))
         else: 
             # increasing order of dist from duration
             duration_sort = sorted(renters, key=lambda renter: abs(renter.duration - self.duration))
             # decreasing order of price (higher price = higher priority)
-            sorted_renters = sorted(duration_sort, key=lambda renter: renter.price, reverse=True)
+            sorted_renters = sorted(duration_sort, key=lambda renter: renter.price, reverse=is_price_descending)
         
-        self.pref_order = sorted_renters
-
+        self.reported_pref_order = sorted_renters
+    
+    def is_price_high_good(self):
+        raise NotImplementedError("Subclasses should implement this method.")
+    
     def weighted_pref_order(self, renters):
+        is_price_descending = self.is_price_high_good() # true for lender, false for renter
+
         # sort by duration, sort by price, then sort by weighted average of two rankings
-        price_sort = sorted(renters, key=lambda renter: renter.price, reverse=True)
+        price_sort = sorted(renters, key=lambda renter: renter.price, reverse=is_price_descending)
         duration_sort = sorted(renters, key=lambda renter: abs(renter.duration - self.duration))
         
-        weighted_rankings = []
+        utility_dict = {}
         for renter in renters:
             price_rank = price_sort.index(renter)
             duration_rank = duration_sort.index(renter)
             weighted_avg = (self.weights["PRICE"]*price_rank) + (self.weights["DURATION"]*duration_rank)/len(self.weights)
-            weighted_rankings.append((renter, weighted_avg))
-        weighted_sort = sorted(weighted_rankings, key=lambda rank: rank[1])
+            utility_dict.setdefault(weighted_avg, []).append(renter)
 
-        sorted_renters = [renter for (renter, weighted_avg) in weighted_sort]
+        sorted_renters = [group for _, group in sorted(utility_dict.items(), key=lambda item: item[0])]
         
-        self.pref_order = sorted_renters
+        self.reported_pref_order = sorted_renters
+
+
+class Lender(Agent):
+    def __init__(self, id, duration_mean, duration_std, price_std):
+        super().__init__(id, duration_mean, duration_std, price_std)
+
+    # for pref order: sort descending?
+    def is_price_high_good(self):
+        return True
+
+    def calculate_utility(self, duration_weight,duration_normalized, price_normalized):
+        # score is diff of weighted, normalized 
+        # higher price is better, higher duration is worse
+        utility = (1-duration_weight) * price_normalized - duration_weight * duration_normalized
+        return utility
 
 class Renter(Agent):
     def __init__(self, id, duration_mean, duration_std, price_std):
         super().__init__(id, duration_mean, duration_std, price_std)
 
-    def strict_pref_order(self, lenders):
-        if self.priority == "DURATION":
-            # increasing order of price (lower price = higher priority)
-            price_sort = sorted(lenders, key=lambda lender: lender.price)
-            # increasing order of duration
-            sorted_lenders = sorted(price_sort, key=lambda lender: abs(lender.duration - self.duration))
-        else: 
-            # increasing order of dist from duration
-            duration_sort = sorted(lenders, key=lambda lender: abs(lender.duration - self.duration))
-            # decreasing order of price (lower price = higher priority)
-            sorted_lenders = sorted(duration_sort, key=lambda lender: lender.price)
-        
-        self.pref_order = sorted_lenders
+    # for pref order: sort descending?
+    def is_price_high_good(self):
+        return False
 
-    def weighted_pref_order(self, lenders):
-        # sort by duration, sort by price, then sort by weighted average of two rankings
-        price_sort = sorted(lenders, key=lambda lender: lender.price)
-        duration_sort = sorted(lenders, key=lambda lender: abs(lender.duration - self.duration))
-        
-        weighted_rankings = []
-        for lender in lenders:
-            price_rank = price_sort.index(lender)
-            duration_rank = duration_sort.index(lender)
-            weighted_avg = (self.weights["PRICE"]*price_rank) + (self.weights["DURATION"]*duration_rank)/len(self.weights)
-            weighted_rankings.append((lender, weighted_avg))
-        weighted_sort = sorted(weighted_rankings, key=lambda rank: rank[1])
-
-        sorted_lenders = [lender for (lender, weighted_avg) in weighted_sort]
-        
-        self.pref_order = sorted_lenders
+    def calculate_utility(self, duration_weight, duration_normalized, price_normalized):
+        # score is diff of weighted, normalized 
+        # lower price is better, lower duration is worse
+        utility = duration_weight * duration_normalized - (1-duration_weight) * price_normalized
+        return utility
