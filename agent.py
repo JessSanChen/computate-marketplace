@@ -38,7 +38,29 @@ class Agent:
         # wrap in gaussian where function is mean
         return np.random.normal(price_fx, self.price_std)
     
-    def stoch_pref_order(self, others, adjusted_std):
+    def baseline_util_pref_order(self, others):
+        # just use own weights, no stochasticity
+
+        duration_mean = np.mean([other.duration for other in others])
+        duration_std = np.std([other.duration for other in others])
+        price_mean = np.mean([other.price for other in others])
+        price_std = np.std([other.price for other in others])
+
+        utility_dict = {}
+        for other in others:
+            duration_diff_normalized = abs(other.duration - self.duration)/duration_std 
+            price_normalized = (other.price - price_mean)/price_std 
+
+            # calculate_utility implemented by children
+            utility = self.calculate_utility(self.weights["DURATION"], duration_diff_normalized, price_normalized)
+            utility_dict.setdefault(utility, []).append(other)
+        
+        # list of lists; inner list is group of agents with same utility
+        sorted_agents = [group for _, group in sorted(utility_dict.items(), key=lambda item: item[0], reverse=True)]
+        
+        return sorted_agents
+    
+    def stoch_util_pref_order(self, others, adjusted_std):
         # agents don't actually know their true preferences, this is "benchmark"?
         new_duration_weight = np.random.normal(self.weights["DURATION"], adjusted_std)
 
@@ -57,8 +79,35 @@ class Agent:
             utility_dict.setdefault(utility, []).append(other)
         
         # list of lists; inner list is group of agents with same utility
-        sorted_agents = [group for _, group in sorted(utility_dict.items(), key=lambda item: item[0])]
+        sorted_agents = [group for _, group in sorted(utility_dict.items(), key=lambda item: item[0], reverse=True)]
+        
+        return sorted_agents
         self.true_pref_order = sorted_agents
+
+    def grouped_util_pref_order(self, others, group_epsilon):
+        # just use own weights, no stochasticity
+
+        duration_mean = np.mean([other.duration for other in others])
+        duration_std = np.std([other.duration for other in others])
+        price_mean = np.mean([other.price for other in others])
+        price_std = np.std([other.price for other in others])
+
+        utility_dict = {}
+        for other in others:
+            duration_diff_normalized = abs(other.duration - self.duration)/duration_std 
+            price_normalized = (other.price - price_mean)/price_std 
+
+            # calculate_utility implemented by children
+            raw_utility = self.calculate_utility(self.weights["DURATION"], duration_diff_normalized, price_normalized)
+            
+            # group!
+            grouped_utility = math.floor(raw_utility / group_epsilon) * group_epsilon
+            utility_dict.setdefault(grouped_utility, []).append(other)
+        
+        # list of lists; inner list is group of agents with same utility
+        sorted_agents = [group for _, group in sorted(utility_dict.items(), key=lambda item: item[0], reverse=True)]
+        
+        return sorted_agents
     
     def calculate_utility(self, duration_weight, other_duration, other_price):
         raise NotImplementedError("Subclasses should implement this method.")
@@ -84,12 +133,13 @@ class Agent:
             # decreasing order of price (higher price = higher priority)
             sorted_renters = sorted(duration_sort, key=lambda renter: renter.price, reverse=is_price_descending)
         
+        return sorted_renters
         self.reported_pref_order = sorted_renters
     
     def is_price_high_good(self):
         raise NotImplementedError("Subclasses should implement this method.")
     
-    def weighted_pref_order(self, renters):
+    def baseline_weightedrank_pref_order(self, renters):
         is_price_descending = self.is_price_high_good() # true for lender, false for renter
 
         # sort by duration, sort by price, then sort by weighted average of two rankings
@@ -105,7 +155,48 @@ class Agent:
 
         sorted_renters = [group for _, group in sorted(utility_dict.items(), key=lambda item: item[0])]
         
-        self.reported_pref_order = sorted_renters
+        return sorted_renters
+    
+    def stoch_weightedrank_pref_order(self, renters, adjusted_std):
+        new_duration_weight = np.random.normal(self.weights["DURATION"], adjusted_std)
+
+        is_price_descending = self.is_price_high_good() # true for lender, false for renter
+
+        # sort by duration, sort by price, then sort by weighted average of two rankings
+        price_sort = sorted(renters, key=lambda renter: renter.price, reverse=is_price_descending)
+        duration_sort = sorted(renters, key=lambda renter: abs(renter.duration - self.duration))
+        
+        utility_dict = {}
+        for renter in renters:
+            price_rank = price_sort.index(renter)
+            duration_rank = duration_sort.index(renter)
+            weighted_avg = ((1-new_duration_weight)*price_rank) + (new_duration_weight*duration_rank)/len(self.weights)
+            utility_dict.setdefault(weighted_avg, []).append(renter)
+
+        sorted_renters = [group for _, group in sorted(utility_dict.items(), key=lambda item: item[0])]
+        
+        return sorted_renters
+    
+    def grouped_weightedrank_pref_order(self, renters, group_epsilon):
+        is_price_descending = self.is_price_high_good() # true for lender, false for renter
+
+        # sort by duration, sort by price, then sort by weighted average of two rankings
+        price_sort = sorted(renters, key=lambda renter: renter.price, reverse=is_price_descending)
+        duration_sort = sorted(renters, key=lambda renter: abs(renter.duration - self.duration))
+        
+        utility_dict = {}
+        for renter in renters:
+            price_rank = price_sort.index(renter)
+            duration_rank = duration_sort.index(renter)
+            raw_weighted_avg = (self.weights["PRICE"]*price_rank) + (self.weights["DURATION"]*duration_rank)/len(self.weights)
+            
+            # group!
+            grouped_weighted_avg = math.floor(raw_weighted_avg / group_epsilon) * group_epsilon
+            utility_dict.setdefault(grouped_weighted_avg, []).append(renter)
+
+        sorted_renters = [group for _, group in sorted(utility_dict.items(), key=lambda item: item[0])]
+        
+        return sorted_renters
 
 
 class Lender(Agent):

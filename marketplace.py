@@ -1,8 +1,7 @@
 from agent import Renter, Lender
 
 class Marketplace():
-    # algo = "STRICT", "WEIGHTED"
-    def __init__(self, num_agents, duration_mean, duration_std, price_std, report_algo, true_algo):
+    def __init__(self, num_agents, duration_mean, duration_std, price_std, report_algo, true_algo, epsilon):
         self.num_agents = num_agents
         self.duration_mean = duration_mean
         self.duration_std = duration_std
@@ -13,7 +12,7 @@ class Marketplace():
         self.lenders = [Lender(i, duration_mean, duration_std, price_std) for i in range(self.num_agents)]
 
         print(f"Calculating reported pref orders using {report_algo} and true pref orders using {true_algo}...")
-        self.generate_pref_orders(report_algo, true_algo)
+        self.generate_pref_orders(report_algo, true_algo, epsilon)
 
         print(f"Performing Gale-Shapley matching...")
         self.matchings = self.match()
@@ -21,36 +20,77 @@ class Marketplace():
         print(f"Checking for stability...")
         self.stable = self.is_stable()
 
-    def generate_pref_orders(self, report_algo, true_algo):
-        # generate report pref order: STRICT, WEIGHTED
-        if report_algo == "STRICT": # strict preference orders
+    def generate_pref_orders(self, report_algo, true_algo, epsilon):
+        # report_algo: UTILITY, WEIGHTED_RANK
+        # true_algo: BASELINE, STOCH, GROUPED
+        # epsilon is grouped_epsilon if grouped, std if stochastic
+        if report_algo == "UTILITY":
             for i in range(self.num_agents):
-                self.renters[i].strict_pref_order(self.lenders)
-                self.lenders[i].strict_pref_order(self.renters)
-        else: # weighted preference orders
+                self.renters[i].reported_pref_order = self.renters[i].baseline_util_pref_order(self.lenders)
+                self.lenders[i].reported_pref_order = self.lenders[i].baseline_util_pref_order(self.renters)
+            if true_algo == "BASELINE":
+                for i in range(self.num_agents):
+                    self.renters[i].true_pref_order = self.renters[i].baseline_util_pref_order(self.lenders)
+                    self.lenders[i].true_pref_order = self.lenders[i].baseline_util_pref_order(self.renters)
+            elif true_algo == "STOCHASTIC":
+                for i in range(self.num_agents):
+                    self.renters[i].true_pref_order = self.renters[i].stoch_util_pref_order(self.lenders, epsilon)
+                    self.lenders[i].true_pref_order = self.lenders[i].stoch_util_pref_order(self.renters, epsilon)
+            elif true_algo == "GROUPED": 
+                for i in range(self.num_agents):
+                    self.renters[i].true_pref_order = self.renters[i].grouped_util_pref_order(self.lenders, epsilon)
+                    self.lenders[i].true_pref_order = self.lenders[i].grouped_util_pref_order(self.renters, epsilon)
+            else:
+                raise NotImplementedError("This algo has not been implemented.")
+        elif report_algo == "WEIGHTED_RANK":
             for i in range(self.num_agents):
-                self.renters[i].weighted_pref_order(self.lenders)
-                self.lenders[i].weighted_pref_order(self.renters)
+                self.renters[i].reported_pref_order = self.renters[i].baseline_weightedrank_pref_order(self.lenders)
+                self.lenders[i].reported_pref_order = self.lenders[i].baseline_weightedrank_pref_order(self.renters)
+            if true_algo == "BASELINE":
+                for i in range(self.num_agents):
+                    self.renters[i].true_pref_order = self.renters[i].baseline_weightedrank_pref_order(self.lenders)
+                    self.lenders[i].true_pref_order = self.lenders[i].baseline_weightedrank_pref_order(self.renters)
+            elif true_algo == "STOCHASTIC":
+                for i in range(self.num_agents):
+                    self.renters[i].true_pref_order = self.renters[i].stoch_weightedrank_pref_order(self.lenders, epsilon)
+                    self.lenders[i].true_pref_order = self.lenders[i].stoch_weightedrank_pref_order(self.renters, epsilon)
+            elif true_algo == "GROUPED": 
+                for i in range(self.num_agents):
+                    self.renters[i].true_pref_order = self.renters[i].grouped_weightedrank_pref_order(self.lenders, epsilon)
+                    self.lenders[i].true_pref_order = self.lenders[i].grouped_weightedrank_pref_order(self.renters, epsilon)
+            else:
+                raise NotImplementedError("This algo has not been implemented.")
+        else:
+            raise NotImplementedError("This algo has not been implemented.")
+        # # generate report pref order: STRICT, WEIGHTED
+        # if report_algo == "STRICT": # strict preference orders
+        #     for i in range(self.num_agents):
+        #         self.renters[i].strict_pref_order(self.lenders)
+        #         self.lenders[i].strict_pref_order(self.renters)
+        # else: # weighted preference orders
+        #     for i in range(self.num_agents):
+        #         self.renters[i].weighted_pref_order(self.lenders)
+        #         self.lenders[i].weighted_pref_order(self.renters)
 
-        # generate true pref order: STOCHASTIC, GROUPED, AREA
-        if true_algo == "STOCHASTIC": # fuzziness in weight reportings
-            # ADJUSTED_STD = 0.1
-            ADJUSTED_STD = 0.
-            for i in range(self.num_agents):
-                self.renters[i].stoch_pref_order(self.lenders, ADJUSTED_STD)
-                self.lenders[i].stoch_pref_order(self.renters, ADJUSTED_STD)
-        elif true_algo == "SAME": # check is stable
-            for i in range(self.num_agents):
-                self.renters[i].true_pref_order = self.renters[i].reported_pref_order
-                self.lenders[i].true_pref_order = self.lenders[i].reported_pref_order
-        elif true_algo == "GROUPED": # ceiling function
-            for i in range(self.num_agents):
-                self.renters[i].grouped_pref_order(self.lenders)
-                self.lenders[i].grouped_pref_order(self.renters)
-        else: # area
-            for i in range(self.num_agents):
-                self.renters[i].area_pref_order(self.lenders)
-                self.lenders[i].area_pref_order(self.renters)
+        # # generate true pref order: STOCHASTIC, GROUPED, AREA
+        # if true_algo == "STOCHASTIC": # fuzziness in weight reportings
+        #     # ADJUSTED_STD = 0.1
+        #     ADJUSTED_STD = 0.
+        #     for i in range(self.num_agents):
+        #         self.renters[i].stoch_pref_order(self.lenders, ADJUSTED_STD)
+        #         self.lenders[i].stoch_pref_order(self.renters, ADJUSTED_STD)
+        # elif true_algo == "SAME": # check is stable
+        #     for i in range(self.num_agents):
+        #         self.renters[i].true_pref_order = self.renters[i].reported_pref_order
+        #         self.lenders[i].true_pref_order = self.lenders[i].reported_pref_order
+        # elif true_algo == "GROUPED": # ceiling function
+        #     for i in range(self.num_agents):
+        #         self.renters[i].grouped_pref_order(self.lenders)
+        #         self.lenders[i].grouped_pref_order(self.renters)
+        # else: # area
+        #     for i in range(self.num_agents):
+        #         self.renters[i].area_pref_order(self.lenders)
+        #         self.lenders[i].area_pref_order(self.renters)
             
 
     def match(self):
