@@ -1,7 +1,7 @@
 from agent import Renter, Lender
 
 class Marketplace():
-    def __init__(self, num_agents, duration_mean, duration_std, price_std, report_algo, true_algo, epsilon):
+    def __init__(self, num_agents, duration_mean, duration_std, price_std, match_algo, report_algo, true_algo, epsilon):
         self.num_agents = num_agents
         self.duration_mean = duration_mean
         self.duration_std = duration_std
@@ -15,10 +15,17 @@ class Marketplace():
         self.generate_pref_orders(report_algo, true_algo, epsilon)
 
         # print(f"Performing Gale-Shapley matching...")
-        self.matchings = self.match()
+        if match_algo == "DA": # deferred acceptance
+            self.matchings = self.match()
+        elif match_algo == "BOSTON": # immediate acceptance (boston)
+            self.matchings = self.boston_match()
+        elif match_algo == "RICH":
+            self.matchings = self.richest_renter_match()
+        else:
+            raise NotImplementedError("This algo has not been implemented.")
 
         # print(f"Checking for stability...")
-        self.stable = self.is_stable()
+        # self.stable = self.is_stable()
 
     def generate_pref_orders(self, report_algo, true_algo, epsilon):
         # report_algo: UTILITY, WEIGHTED_RANK
@@ -62,44 +69,11 @@ class Marketplace():
                 raise NotImplementedError("This algo has not been implemented.")
         else:
             raise NotImplementedError("This algo has not been implemented.")
-        # # generate report pref order: STRICT, WEIGHTED
-        # if report_algo == "STRICT": # strict preference orders
-        #     for i in range(self.num_agents):
-        #         self.renters[i].strict_pref_order(self.lenders)
-        #         self.lenders[i].strict_pref_order(self.renters)
-        # else: # weighted preference orders
-        #     for i in range(self.num_agents):
-        #         self.renters[i].weighted_pref_order(self.lenders)
-        #         self.lenders[i].weighted_pref_order(self.renters)
-
-        # # generate true pref order: STOCHASTIC, GROUPED, AREA
-        # if true_algo == "STOCHASTIC": # fuzziness in weight reportings
-        #     # ADJUSTED_STD = 0.1
-        #     ADJUSTED_STD = 0.
-        #     for i in range(self.num_agents):
-        #         self.renters[i].stoch_pref_order(self.lenders, ADJUSTED_STD)
-        #         self.lenders[i].stoch_pref_order(self.renters, ADJUSTED_STD)
-        # elif true_algo == "SAME": # check is stable
-        #     for i in range(self.num_agents):
-        #         self.renters[i].true_pref_order = self.renters[i].reported_pref_order
-        #         self.lenders[i].true_pref_order = self.lenders[i].reported_pref_order
-        # elif true_algo == "GROUPED": # ceiling function
-        #     for i in range(self.num_agents):
-        #         self.renters[i].grouped_pref_order(self.lenders)
-        #         self.lenders[i].grouped_pref_order(self.renters)
-        # else: # area
-        #     for i in range(self.num_agents):
-        #         self.renters[i].area_pref_order(self.lenders)
-        #         self.lenders[i].area_pref_order(self.renters)
-            
 
     def match(self):
         # renter-proposing
 
         # convert lender pref lists into dictionary for faster lookup
-        # lenders_prefs = {lender.id: {renter.id: i for (i, renter) in enumerate(lender.reported_pref_order)} for lender in self.lenders}
-        # renter_prefs = {renter.id: {lender.id: i for (i, lender) in enumerate(renter.reported_pref_order)} for renter in self.renters}
-        
         # grouped preferences version
         lenders_prefs = {
             lender.id: {
@@ -230,74 +204,103 @@ class Marketplace():
 
         return True
     
-    if False:
-        def is_stable(self):
-            # check each lender
-            for lender in self.lenders:
-                for preferred_group in lender.true_pref_order:
-                    if lender.match in preferred_group:
-                        # The lender's current match is in this preferred group
-                        current_match_group = preferred_group
-                        break
-                    else:
-                        # if current match not found in any group, continue
-                        continue
+    def boston_match(self):
+        lenders_prefs = {
+            lender.id: {
+                renter.id: i
+                for i, group in enumerate(lender.reported_pref_order)
+                for renter in group
+            }
+            for lender in self.lenders
+        }
 
-                for preferred_group in lender.true_pref_order:
-                    for preferred_renter in preferred_group:
-                        if preferred_group == current_match_group:
-                            # No need to check further if we reached the group of the current match
-                            break
+        renter_prefs = {
+            renter.id: {
+                lender.id: i
+                for i, group in enumerate(renter.reported_pref_order)
+                for lender in group
+            }
+            for renter in self.renters
+        }
+    
+        # Initialize all renters as free
+        free_renters = set(self.renters)
 
-                        # Check if the preferred renter also prefers this lender over their current match
-                        for renter_preferred_group in preferred_renter.true_pref_order:
-                            if lender in renter_preferred_group:
-                                # The lender is in one of the renter's preferred groups
-                                renter_current_match_group = [group for group in preferred_renter.true_pref_order if preferred_renter.match in group][0]
-                                if renter_preferred_group.index(lender) < renter_preferred_group.index(renter_current_match_group):
-                                    return False  # Found an unstable pair
+        # Initialize all lenders as free
+        for lender in self.lenders:
+            lender.match = None
 
-                    # # Check if the lender prefers this renter over their current match
-                    # if lender.true_pref_order.index(preferred_renter) < lender.true_pref_order.index(lender.match):
-                    #     # Check if the preferred renter also prefers this lender over their current match
-                    #     # if preferred_renter.true_pref_order.index(lender) < preferred_renter.true_pref_order.index(preferred_renter.match):
-                        
-                    #     # pref group version
-                    #     if any(preferred_lender in renter.true_pref_order for preferred_lender in lender.true_pref_order):
-                    #         return False  # Found an unstable pair
-                    
-            # Check each renter
-            for renter in self.renters:
-                for preferred_group in renter.true_pref_order:
-                    if renter.match in preferred_group:
-                        # The renter's current match is in this preferred group
-                        current_match_group = preferred_group
-                        break
-                else:
-                    # If the current match is not found in any group, continue to the next renter
+        while free_renters:
+            # In each round, each free renter applies to their most preferred lender that has not yet rejected them
+            for renter in list(free_renters):
+                if not renter.reported_pref_order:  # If the renter has no more preferences, they remain unmatched
+                    free_renters.remove(renter)
                     continue
 
-                for preferred_group in renter.true_pref_order:
-                    for preferred_lender in preferred_group:
-                        if preferred_group == current_match_group:
-                            # No need to check further if we reached the group of the current match
-                            break
+                # Renter applies to the most preferred lender in their list
+                preferred_group = renter.reported_pref_order.pop(0)
+                for preferred_lender in preferred_group:
+                    # If the lender is free or prefers this renter over their current match
+                    if preferred_lender.match is None or lenders_prefs[preferred_lender.id][renter.id] < lenders_prefs[preferred_lender.id][preferred_lender.match.id]:
+                        # If the lender is already matched, the current match becomes free
+                        if preferred_lender.match:
+                            free_renters.add(preferred_lender.match)
+                            preferred_lender.match.match = None
 
-                        # Check if the preferred lender also prefers this renter over their current match
-                        for lender_preferred_group in preferred_lender.true_pref_order:
-                            if renter in lender_preferred_group:
-                                # The renter is in one of the lender's preferred groups
-                                lender_current_match_group = [group for group in preferred_lender.true_pref_order if preferred_lender.match in group][0]
-                                if lender_preferred_group.index(renter) < lender_preferred_group.index(lender_current_match_group):
-                                    return False  # Found an unstable pair
+                        # Match the renter and the lender
+                        preferred_lender.match = renter
+                        renter.match = preferred_lender
+                        free_renters.remove(renter)
+                        break  # Renter exits the loop once matched
 
-            # for renter in self.renters:
-            #     for preferred_lender in renter.true_pref_order:
-            #         # Check if the renter prefers this lender over their current match
-            #         if renter.true_pref_order.index(preferred_lender) < renter.true_pref_order.index(renter.match):
-            #             # Check if the preferred lender also prefers this renter over their current match
-            #             # if preferred_lender.true_pref_order.index(renter) < preferred_lender.true_pref_order.index(preferred_lender.match):
-            #             if any(preferred_renter in lender.true_pref_order for preferred_renter in renter.true_pref_order):
-            #                 return False  # Found an unstable pair
-                        
-            return True
+        matchings = [(renter.id, renter.match.id if renter.match else None) for renter in self.renters]
+        return matchings
+    
+    def richest_renter_match(self):
+        lenders_prefs = {
+            lender.id: {
+                renter.id: i
+                for i, group in enumerate(lender.reported_pref_order)
+                for renter in group
+            }
+            for lender in self.lenders
+        }
+
+        renter_prefs = {
+            renter.id: {
+                lender.id: i
+                for i, group in enumerate(renter.reported_pref_order)
+                for lender in group
+            }
+            for renter in self.renters
+        }
+
+        # Sort renters by price in descending order
+        sorted_renters = sorted(self.renters, key=lambda renter: renter.price, reverse=True)
+
+        # Initialize all lenders as free
+        for lender in self.lenders:
+            lender.match = None
+
+        # Renters propose in order of their price, highest first
+        for renter in sorted_renters:
+            for preferred_group in renter.reported_pref_order:
+                for preferred_lender in preferred_group:
+                    # If the lender is free or prefers this renter over their current match
+                    if preferred_lender.match is None or lenders_prefs[preferred_lender.id][renter.id] < lenders_prefs[preferred_lender.id][preferred_lender.match.id]:
+                        # If the lender is already matched, the current match becomes unmatched
+                        if preferred_lender.match:
+                            preferred_lender.match.match = None
+
+                        # Match the renter and the lender
+                        preferred_lender.match = renter
+                        renter.match = preferred_lender
+                        break  # Renter exits the loop once matched
+
+                if renter.match:
+                    break  # Move to the next renter once the current one is matched
+
+        matchings = [(renter.id, renter.match.id if renter.match else None) for renter in self.renters]
+        return matchings
+
+        
